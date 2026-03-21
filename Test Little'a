@@ -1,0 +1,56 @@
+import pandas as pd
+import numpy as np
+from pyampute.exploration.mcar_statistical_tests import MCARTest
+
+PATH = r"C:\Users\Admin\Desktop\Uzupełnianie danych\1.3 int MCAR\1.3.1 insurance int MCAR średnia.csv"
+
+# Wczytanie: separator ; + przecinek jako separator dziesiętny + rozpoznanie braków
+df = pd.read_csv(
+    PATH,
+    sep=";",
+    decimal=",",
+    na_values=["", " ", "nan", "NaN", "NULL", "null", "N/A", "NA", -999]
+)
+
+print("Braki w df (suma):", int(df.isna().sum().sum()))
+print("Kolumny z brakami:", df.columns[df.isna().any()].tolist())
+print(df.isna().sum())
+
+# Jeśli nie ma braków, test Little'a nie ma sensu
+if not df.isna().any().any():
+    print("Brak braków danych — test Little’a nie jest wykonywany.")
+else:
+    # Dummies tylko dla kategorii
+    X = pd.get_dummies(df, drop_first=True, dummy_na=False)
+
+    # usuń stałe i duplikaty
+    X = X.loc[:, X.nunique(dropna=True) > 1]
+    X = X.loc[:, ~X.T.duplicated()]
+
+    print("Czy są braki w X?:", X.isna().any().any())
+    print("Liczba kolumn z brakami:", int(X.isna().any().sum()))
+
+    mt = MCARTest(method="little")
+    p_value = mt.little_mcar_test(X)
+
+    # --- raportowanie p-value (próg 0.0001) ---
+    alpha_report = 1e-4
+    alpha_test = 0.05
+
+    if pd.isna(p_value):
+        p_report = "p = NaN (test nie mógł zostać obliczony)"
+        interpretation = "Interpretacja: test nie został obliczony — nie można ocenić MCAR."
+    elif p_value < alpha_report:
+        p_report = "p < 0.0001"
+        interpretation = "Interpretacja: odrzucono hipotezę MCAR (braki nie są całkowicie losowe)."
+    else:
+        p_report = f"p = {p_value:.4f}"
+        if p_value < alpha_test:
+            interpretation = "Interpretacja: odrzucono hipotezę MCAR (braki nie są całkowicie losowe)."
+        else:
+            interpretation = "Interpretacja: brak podstaw do odrzucenia hipotezy MCAR (braki mogą być całkowicie losowe)."
+
+    print("Little MCAR p-value (raw):", p_value)
+    print("Little MCAR p-value (report):", p_report)
+    print(interpretation)
+    print("Użyto kształtu X:", X.shape)

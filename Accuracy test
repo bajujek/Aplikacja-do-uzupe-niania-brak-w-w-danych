@@ -1,0 +1,101 @@
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+def _read_csv_robust(path: str) -> pd.DataFrame:
+
+    path = str(path)
+
+    # Spróbuj średnik
+    try:
+        df = pd.read_csv(path, sep=";")
+        if df.shape[1] > 1:
+            return df
+    except Exception:
+        pass
+
+    # Spróbuj przecinek
+    df = pd.read_csv(path, sep=",")
+    return df
+
+
+def evaluate_imputation_accuracy(source_path: str, imputed_path: str) -> None:
+
+    src = _read_csv_robust(source_path)
+    imp = _read_csv_robust(imputed_path)
+
+    # Kontrole podstawowe
+    if src.shape != imp.shape:
+        raise ValueError(f"Różne wymiary plików: source={src.shape}, imputed={imp.shape}")
+    if list(src.columns) != list(imp.columns):
+        raise ValueError("Kolumny w plikach różnią się (inna kolejność lub nazwy).")
+
+    # Jeśli ktoś wczytał 1 kolumnę, zatrzymaj i powiedz czemu
+    if src.shape[1] == 1:
+        raise ValueError(
+            "Plik source wczytał się jako 1 kolumna — prawdopodobnie zły separator CSV."
+        )
+    if imp.shape[1] == 1:
+        raise ValueError(
+            "Plik imputed wczytał się jako 1 kolumna — prawdopodobnie zły separator CSV."
+        )
+
+    # Ujednolicenie "udawanych braków" (puste, spacje)
+    src = src.replace(r"^\s*$", np.nan, regex=True)
+    imp = imp.replace(r"^\s*$", np.nan, regex=True)
+
+    # Kolumny nienumeryczne (kategoryczne/tekstowe)
+    non_num_src = src.select_dtypes(exclude="number").columns
+    non_num_imp = imp.select_dtypes(exclude="number").columns
+    cat_cols = non_num_src.intersection(non_num_imp)
+
+    if len(cat_cols) == 0:
+        raise ValueError("Brak kolumn nienumerycznych do oceny accuracy.")
+
+    per_col = []
+    accs = []
+
+    for col in cat_cols:
+        # porównujemy tylko tam, gdzie obie strony mają wartość
+        m = src[col].notna() & imp[col].notna()
+        n = int(m.sum())
+
+        if n == 0:
+            per_col.append((col, 0, np.nan))
+            continue
+
+        s1 = src.loc[m, col].astype(str).str.strip()
+        s2 = imp.loc[m, col].astype(str).str.strip()
+
+        acc = float((s1 == s2).mean())
+        per_col.append((col, n, acc))
+        accs.append(acc)
+
+    overall = float(np.mean(accs)) if accs else np.nan
+
+    # -------- OUTPUT w stylu jak chcesz --------
+    print("Accuracy (kolumny nienumeryczne) — porównanie source vs imputed")
+    print(f"Liczba kolumn nienumerycznych: {len(cat_cols)}")
+    if np.isnan(overall):
+        print("Accuracy łączne (średnia po kolumnach): brak danych\n")
+    else:
+        print(f"Accuracy łączne (średnia po kolumnach): {overall:.6f}\n")
+
+    print("Accuracy per kolumna:")
+    for col, n, acc in per_col:
+        if np.isnan(acc):
+            acc_str = "brak danych"
+        else:
+            acc_str = f"{acc:.6f}"
+        print(f" - {col}: n={n}, accuracy={acc_str}")
+
+
+if __name__ == "__main__":
+    folder = "2.3 text MCAR"
+    plik = "2.3.5 insurance text MCAR regresja log"
+
+
+    SOURCE_CSV = r"C:\Users\Admin\Desktop\Uzupełnianie danych\insurance spr.csv"
+    IMPUTED_CSV = fr"C:\Users\Admin\Desktop\Uzupełnianie danych\{folder}\{plik}.csv"
+
+    evaluate_imputation_accuracy(SOURCE_CSV, IMPUTED_CSV)
